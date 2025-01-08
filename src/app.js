@@ -7,6 +7,7 @@ const sqlite3 = require("sqlite3").verbose();
 const fs = require("fs");
 require("dotenv").config();
 const userRoutes = require("./user.routes");
+const eventsRoutes = require("./event.routes");
 
 const initializeDatabase = () => {
   const db = new sqlite3.Database("mydatabase.db", (err) => {
@@ -73,6 +74,10 @@ const db = initializeDatabase();
     req.db = db;
     next();
   }, userRoutes);
+  app.use("/api/events", (req, res, next) => {
+    req.db = db;
+    next();
+  }, eventsRoutes);
 
   // Handle 404 errors
   app.use((req, res) => {
