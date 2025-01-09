@@ -20,4 +20,27 @@ CREATE TABLE IF NOT EXISTS Events (
     creator_id INTEGER NOT NULL,
     FOREIGN KEY (creator_id) REFERENCES Users(user_id)
 );
+CREATE TABLE IF NOT EXISTS Attendees (
+    event_id INTEGER NOT NULL,
+    user_id  INTEGER NOT NULL,
+    PRIMARY KEY (event_id, user_id),
+    FOREIGN KEY (event_id) REFERENCES Events(event_id),
+    FOREIGN KEY (user_id)  REFERENCES Users(user_id)
+);
+CREATE TABLE IF NOT EXISTS Questions (
+    question_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    question    TEXT    NOT NULL,
+    asked_by    INTEGER NOT NULL,
+    event_id    INTEGER NOT NULL,
+    votes       INTEGER DEFAULT 0,
+    FOREIGN KEY (asked_by) REFERENCES Users(user_id),
+    FOREIGN KEY (event_id) REFERENCES Events(event_id)
+);
 
+CREATE TABLE IF NOT EXISTS Votes (
+    question_id INTEGER NOT NULL,
+    voter_id    INTEGER NOT NULL,
+    PRIMARY KEY (question_id, voter_id),
+    FOREIGN KEY (question_id) REFERENCES Questions(question_id),
+    FOREIGN KEY (voter_id)    REFERENCES Users(user_id)
+);

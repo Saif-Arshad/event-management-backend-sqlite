@@ -55,6 +55,65 @@ router.post("/", authenticateUser, (req, res) => {
     );
 });
 
+router.get("/questions", (req, res) => {
+    const { event_id } = req.query;
+
+    if (!event_id) {
+        return res
+            .status(400)
+            .json({ success: false, error: "Event ID is required" });
+    }
+
+    const sql = `
+    SELECT * 
+    FROM Questions 
+    WHERE event_id = ?`;
+
+    req.db.all(sql, [event_id], (err, rows) => {
+        if (err) {
+            return res.status(500).json({ success: false, error: err.message });
+        }
+
+        res.json({ success: true, questions: rows });
+    });
+});
+
+
+router.post("/question", authenticateUser, async (req, res) => {
+    try {
+        const { question, question_id, event_id } = req.body;
+
+        if (!question || !question_id || !event_id) {
+            return res
+                .status(400)
+                .json({ error: "Missing required fields (question, question_id, event_id)." });
+        }
+
+        let user_id = req.user.id
+
+
+
+        const insertQuery = `
+      INSERT INTO Questions (question_id, question, asked_by, event_id, votes)
+      VALUES (?, ?, ?, ?, 0)
+    `;
+        await req.db.run(insertQuery, [question_id, question, user_id, event_id]);
+
+        return res.status(201).json({
+            message: "Question created successfully",
+            data: {
+                question_id,
+                question,
+                event_id,
+                asked_by: user_id,
+                votes: 0,
+            },
+        });
+    } catch (err) {
+        console.error("Error creating question:", err);
+        return res.status(500).json({ error: "Internal server error" });
+    }
+});
 router.get("/", authenticateUser, (req, res) => {
     const sql = `SELECT * FROM Events WHERE creator_id = ?`;
     req.db.all(sql, [req.user.id], (err, rows) => {
@@ -62,9 +121,15 @@ router.get("/", authenticateUser, (req, res) => {
         res.json({ success: true, events: rows });
     });
 });
+router.get("/all-events", (req, res) => {
+    const sql = `SELECT * FROM Events`;
+    req.db.all(sql, [], (err, rows) => {
+        if (err) return handleError(res, 500, err.message);
+        res.json({ success: true, events: rows });
+    });
+});
 
-// GET /api/events/:id - Get event by ID
-router.get("/:id", authenticateUser, (req, res) => {
+router.get("/:id", (req, res) => {
     const sql = `SELECT * FROM Events WHERE event_id = ?`;
     req.db.get(sql, [req.params.id], (err, row) => {
         if (err) return handleError(res, 500, err.message);
@@ -73,7 +138,6 @@ router.get("/:id", authenticateUser, (req, res) => {
     });
 });
 
-// PUT /api/events/:id - Update an event
 router.put("/:id", authenticateUser, (req, res) => {
     const { name, description, location, start_date, close_registration, max_attendees } = req.body;
 
@@ -94,7 +158,6 @@ router.put("/:id", authenticateUser, (req, res) => {
     );
 });
 
-// DELETE /api/events/:id - Delete an event
 router.delete("/:id", authenticateUser, (req, res) => {
     const sql = `DELETE FROM Events WHERE event_id = ? AND creator_id = ?`;
     req.db.run(sql, [req.params.id, req.user.id], function (err) {
