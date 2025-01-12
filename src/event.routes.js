@@ -81,9 +81,9 @@ router.get("/questions", (req, res) => {
 
 router.post("/question", authenticateUser, async (req, res) => {
     try {
-        const { question, question_id, event_id } = req.body;
+        const { question, event_id } = req.body;
 
-        if (!question || !question_id || !event_id) {
+        if (!question || !event_id) {
             return res
                 .status(400)
                 .json({ error: "Missing required fields (question, question_id, event_id)." });
@@ -94,15 +94,14 @@ router.post("/question", authenticateUser, async (req, res) => {
 
 
         const insertQuery = `
-      INSERT INTO Questions (question_id, question, asked_by, event_id, votes)
-      VALUES (?, ?, ?, ?, 0)
-    `;
-        await req.db.run(insertQuery, [question_id, question, user_id, event_id]);
+            INSERT INTO Questions (question, asked_by, event_id, votes)
+            VALUES (?, ?, ?, 0)
+        `;
+        await req.db.run(insertQuery, [question, user_id, event_id]);
 
         return res.status(201).json({
             message: "Question created successfully",
             data: {
-                question_id,
                 question,
                 event_id,
                 asked_by: user_id,
@@ -129,14 +128,56 @@ router.get("/all-events", (req, res) => {
     });
 });
 
-router.get("/:id", (req, res) => {
-    const sql = `SELECT * FROM Events WHERE event_id = ?`;
-    req.db.get(sql, [req.params.id], (err, row) => {
+router.get("/:id", authenticateUser, (req, res) => {
+    const eventId = req.params.id;
+    const userId = req.user.id;
+
+    const eventDetailsQuery = `
+        SELECT e.*, 
+               (SELECT COUNT(*) FROM Attendees WHERE event_id = e.event_id) AS attendee_count
+        FROM Events e 
+        WHERE e.event_id = ?
+    `;
+
+    const questionsQuery = `
+        SELECT q.*, 
+               (SELECT COUNT(*) FROM Votes WHERE question_id = q.question_id AND voter_id = ?) AS user_voted
+        FROM Questions q 
+        WHERE q.event_id = ?
+    `;
+
+    const userAttendanceQuery = `
+        SELECT COUNT(*) AS is_joined 
+        FROM Attendees 
+        WHERE event_id = ? AND user_id = ?
+    `;
+
+    req.db.get(eventDetailsQuery, [eventId], (err, event) => {
         if (err) return handleError(res, 500, err.message);
-        if (!row) return handleError(res, 404, "Event not found.");
-        res.json({ success: true, event: row });
+        if (!event) return handleError(res, 404, "Event not found.");
+
+        req.db.all(questionsQuery, [userId, eventId], (err, questions) => {
+            if (err) return handleError(res, 500, err.message);
+
+            req.db.get(userAttendanceQuery, [eventId, userId], (err, attendance) => {
+                if (err) return handleError(res, 500, err.message);
+
+                res.json({
+                    success: true,
+                    event: {
+                        ...event,
+                        is_joined: attendance.is_joined > 0, // True if user has joined
+                    },
+                    questions: questions.map((q) => ({
+                        ...q,
+                        user_voted: q.user_voted > 0, // True if user voted
+                    })),
+                });
+            });
+        });
     });
 });
+
 
 router.put("/:id", authenticateUser, (req, res) => {
     const { name, description, location, start_date, close_registration, max_attendees } = req.body;
@@ -166,5 +207,68 @@ router.delete("/:id", authenticateUser, (req, res) => {
         res.json({ success: true, message: "Event deleted successfully" });
     });
 });
+router.post("/attend", authenticateUser, (req, res) => {
+    const { event_id } = req.body;
+
+    if (!event_id) {
+        return handleError(res, 400, "Event ID is required.");
+    }
+
+    const sqlCheck = `SELECT * FROM Events WHERE event_id = ?`;
+    req.db.get(sqlCheck, [event_id], (err, row) => {
+        if (err) return handleError(res, 500, err.message);
+        if (!row) return handleError(res, 404, "Event not found.");
+
+        const sqlInsert = `INSERT INTO Attendees (event_id, user_id) VALUES (?, ?)`;
+        req.db.run(sqlInsert, [event_id, req.user.id], function (err) {
+            if (err) {
+                if (err.message.includes("UNIQUE constraint failed")) {
+                    return handleError(res, 400, "User is already an attendee of this event.");
+                }
+                return handleError(res, 500, err.message);
+            }
+
+            res.json({
+                success: true,
+                message: "You have successfully registered as an attendee for the event.",
+            });
+        });
+    });
+});
+
+router.post("/vote", authenticateUser, (req, res) => {
+    const { question_id } = req.body;
+
+    if (!question_id) {
+        return handleError(res, 400, "Question ID is required.");
+    }
+
+    const sqlCheck = `SELECT * FROM Questions WHERE question_id = ?`;
+    req.db.get(sqlCheck, [question_id], (err, row) => {
+        if (err) return handleError(res, 500, err.message);
+        if (!row) return handleError(res, 404, "Question not found.");
+
+        const sqlInsert = `INSERT INTO Votes (question_id, voter_id) VALUES (?, ?)`;
+        req.db.run(sqlInsert, [question_id, req.user.id], function (err) {
+            if (err) {
+                if (err.message.includes("UNIQUE constraint failed")) {
+                    return handleError(res, 400, "You have already voted for this question.");
+                }
+                return handleError(res, 500, err.message);
+            }
+
+            const sqlUpdateVotes = `UPDATE Questions SET votes = votes + 1 WHERE question_id = ?`;
+            req.db.run(sqlUpdateVotes, [question_id], (err) => {
+                if (err) return handleError(res, 500, err.message);
+
+                res.json({
+                    success: true,
+                    message: "Your vote has been recorded.",
+                });
+            });
+        });
+    });
+});
+
 
 module.exports = router;
